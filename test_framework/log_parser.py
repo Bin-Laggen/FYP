@@ -14,12 +14,12 @@ from wrappers import KNNWrapper, IFWrapper, LOFWrapper#, COFWrapper
 
 class LogParser():
     
-    def __init__(self, filename, verbose=0):
-        self._readfile(filename)
+    def __init__(self, filename, index_column=None, verbose=0):
+        self._readfile(filename, index_column)
         self._verbose = verbose
         
-    def _readfile(self, filename):
-        self._dataset = pd.read_csv('reduced_log.csv')
+    def _readfile(self, filename, index_column):
+        self._dataset = pd.read_csv(filename, index_col=index_column)
         pd.options.display.max_columns = self._dataset.shape[1]
         
     def _parse(self):
@@ -62,7 +62,7 @@ class LogParser():
                            
         overlap = results[0]
         for r in range(1, len(results)):
-            overlap = compareIndexes(overlap, results[r])
+            overlap = self._compareOutliers(overlap, results[r])
         
         return overlap
         
@@ -245,5 +245,6 @@ def main():
     
     print('\nEnd of execution\n')
     print(datetime.now() - start)
-    
-main()
+
+if __name__ == '__main__':   
+    main()

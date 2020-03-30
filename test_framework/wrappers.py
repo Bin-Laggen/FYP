@@ -24,7 +24,8 @@ class AlgorithmWrapper():
     def runTests(self):
         results = []
         for p in self._parameters:
-            print('Testing param:', p)
+            if self._verbose > 0:
+                print('Testing param:', p)
             results.append(self._predictOutliers(p))
         return results, self._parseResults(results)
     
@@ -61,7 +62,8 @@ class AlgorithmWrapper():
                 print('====\n')
             if self._verbose > 1:
                 print(self._dataset[results[i]==1])
-        print(scores)
+        if self._verbose > 0:
+            print(scores)
         return self._calculateBestParam(scores)
     
     def _calculateBestParam(self, scores):
@@ -276,5 +278,6 @@ class LOFWrapper(AlgorithmWrapper):
     
 #     print('\nEnd of execution\n')
 #     print(datetime.now() - start)
-    
-# main()
+
+# if __name__ == '__main__':   
+#     main()
