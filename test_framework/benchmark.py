@@ -6,7 +6,6 @@ Created on Sun Mar 29 22:39:49 2020
 """
 
 import pandas as pd
-import numpy as np
 
 import psutil
 import os
@@ -18,46 +17,89 @@ import argparse
 
 from datetime import datetime
 
+from sklearn import metrics
+
 from log_parser import CSVLogParser, JSONLogParser, ExcelLogParser
 from test_runner import OutlierTestRunner
 from wrappers import KNNWrapper, IFWrapper, LOFWrapper
+from report_generator import ReportGenerator
 
 global run
 
-def benchmarkAllAlgorithms(parsed_dataset, input_data, outlier_label, process):
+def benchmarkAllAlgorithms(parsed_dataset, input_data, outlier_label, stats, verbose):
     print('KNN')
     knn = KNNWrapper(parsed_dataset)
-    singleBenchmark(knn, input_data, outlier_label, process)
+    knn_stats = dict()
+    singleBenchmark(knn, input_data, outlier_label, knn_stats, verbose)
+    # print(knn_stats)
     print('============================================================================')
     print()
     
-    print('IF')
+    print('IFOREST')
     iforest = IFWrapper(parsed_dataset)
-    singleBenchmark(iforest, input_data, outlier_label, process)
+    if_stats = dict()
+    singleBenchmark(iforest, input_data, outlier_label, if_stats, verbose)
+    # print(if_stats)
     print('============================================================================')
     print()
     
     print('LOF')
     lof = LOFWrapper(parsed_dataset)
-    singleBenchmark(lof, input_data, outlier_label, process)
+    lof_stats = dict()
+    singleBenchmark(lof, input_data, outlier_label, lof_stats, verbose)
+    # print(lof_stats)
     print('============================================================================')
     print()
     print('<><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><>')
     print()
+    
+    stats['KNN'] = knn_stats
+    stats['IFOREST'] = if_stats
+    stats['LOF'] = lof_stats
     return
         
-def singleBenchmark(algorithm, input_data, outlier_label, process):
-    for param in algorithm.getParams():
-        print('Param:', param)
+def singleBenchmark(algorithm, input_data, outlier_label, stats, verbose):
+    
+    outliers_in_dataset = input_data[input_data[outlier_label]==1].index.size
+    
+    for i, param in enumerate(algorithm.getParams()):
+        if verbose > 0:
+            print('Param:', param)
+        
         start = datetime.now()
         res = algorithm.singleRun(param)
-        end = datetime.now() - start
-        outliers = input_data.loc[pd.Series(res==1)]
-        overlap = OutlierTestRunner.compareOutliers(res, input_data[outlier_label])
-        print(outliers.index.size, '/', input_data[input_data[outlier_label]==1].index.size, '=', (outliers.index.size / input_data[input_data[outlier_label]==1].index.size) * 100, '%')
-        print((np.count_nonzero(overlap) / input_data[input_data[outlier_label]==1].index.size) * 100, '%')
-        print(end)
-        print()
+        processing_time = datetime.now() - start
+        
+        C = metrics.confusion_matrix(input_data[outlier_label], res)
+        
+        od_acc = round((C[1,1] / outliers_in_dataset), 4)
+        cl_acc = round(metrics.accuracy_score(input_data[outlier_label], res), 4)
+        bal_acc = round(metrics.balanced_accuracy_score(input_data[outlier_label], res), 4)
+        pre_acc_bin = round(metrics.precision_score(input_data[outlier_label], res, average='binary', zero_division=0), 4)
+        pre_acc_mac = round(metrics.precision_score(input_data[outlier_label], res, average='macro', zero_division=0), 4)
+        com_acc = round(od_acc * cl_acc, 4)
+        
+        if verbose > 0:
+            print('True inliers:', C[0,0])
+            print('False inliers:', C[1,0])
+            print('True outliers:', C[1,1])
+            print('False outliers:', C[0,1])
+            print(C[1,1] + C[0,1], '/', outliers_in_dataset,
+                  '=', (C[1,1] + C[0,1] / outliers_in_dataset) * 100, '%')
+            print('Outlier Detection Accuraccy', od_acc * 100, '%')
+            print('Classification Accuraccy', cl_acc * 100, '%')
+            print('Combined Accuraccy', com_acc * 100, '%')
+            print('Balanced Accuraccy', bal_acc * 100, '%')
+            print('Precision (Binary) Accuraccy', pre_acc_bin * 100, '%')
+            print('Precision (Macro) Accuraccy', pre_acc_mac * 100, '%')
+            print(processing_time)
+            print()
+        
+        stats[i] = {'parameter': param, 'num_found': C[1,1] + C[0,1], 'od_acc': od_acc * 100, 
+                    'cl_acc': cl_acc * 100, 'com_acc': com_acc * 100, 'bal_acc': bal_acc * 100,
+                    'pre_acc_bin': pre_acc_bin * 100, 'pre_acc_mac': pre_acc_mac * 100, 
+                    'time': processing_time}
+        
     return
 
 def memoryCounterFunc(process):
@@ -70,11 +112,16 @@ def readArgs():
     parser = argparse.ArgumentParser(description='    Outlier Detector Benchmark    ')
     parser.add_argument('file', help='Dataset file to use for benchmarking', type=str)
     parser.add_argument('outlier', help='Label of outlier column', type=str)
-    parser.add_argument('-v', '--verbose', help='Set verbosity level', default=0, type=int, choices=[0, 1, 2])
+    parser.add_argument('-o', '--output', help='Output directory for results', default='result', type=str)
+    parser.add_argument('-v', '--verbose', help='Set verbosity level', default=0, type=int,
+                        choices=[0, 1, 2])
     options_group = parser.add_argument_group(description='Dataset info')
-    options_group.add_argument('-j', '--json', help='JSON format of dataset', default='records', choices=['split','records','index', 'columns','values', 'table'])
-    options_group.add_argument('-s', '--sheet', help='Name of Excel sheet containing dataset, all if not specified', default=None)
-    options_group.add_argument('-i', '--index', help='Dataset index column (-1 if N/A)', default=0, type=int)
+    options_group.add_argument('-j', '--json', help='JSON format of dataset', default='records',
+                               choices=['split','records','index', 'columns','values', 'table'])
+    options_group.add_argument('-s', '--sheet', help='Name of Excel sheet containing dataset, all if not specified',
+                               default=None)
+    options_group.add_argument('-i', '--index', help='Dataset index column (-1 if N/A)', default=0,
+                               type=int)
     args = parser.parse_args()
     return args
 
@@ -93,6 +140,7 @@ def main():
         exit(1)
         
     outlier_label = args.outlier
+    output_dir = args.output
     
     index = args.index
     if index < 0:
@@ -102,15 +150,16 @@ def main():
     
     file_type = filename.split('.')[-1]
     
-    print()
-    print('File:', filename)
-    print('Type:', file_type)
-    print('Outlier label:', outlier_label)
-    print('Verbose level:', verbose)
-    print('Index column:', index)
-    print('Sheet:', args.sheet)
-    print('JSON:', args.json)
-    print()
+    if verbose > 0:
+        print()
+        print('File:', filename)
+        print('Type:', file_type)
+        print('Outlier label:', outlier_label)
+        print('Verbose level:', verbose)
+        print('Index column:', index)
+        print('Sheet:', args.sheet)
+        print('JSON:', args.json)
+        print()
     
     
     if file_type.lower() == 'csv':
@@ -131,29 +180,40 @@ def main():
         print('Invalid outlier label:', outlier_label, file=sys.stderr)
         exit(1)
     
-    print(parsed_dataset)
+    if verbose > 0:
+        print(parsed_dataset)
     
-    process = psutil.Process(os.getpid())
     global run
     run = True
-    t = threading.Thread(target=memoryCounterFunc, args=(process,), daemon=True)
-    t.start()
+    show_mem_usage = parsed_dataset.index.size > 25000
+    
+    if show_mem_usage and verbose > 0:
+        process = psutil.Process(os.getpid())
+        t = threading.Thread(target=memoryCounterFunc, args=(process,), daemon=True)
+        t.start()
         
     try:
-        benchmarkAllAlgorithms(parsed_dataset, original, outlier_label, process)
-    except Exception as e:
-        run = False
-        t.join()
-        raise e
-    
+        stats = dict()
+        benchmarkAllAlgorithms(parsed_dataset, original, outlier_label, stats, verbose)
+    except pd.core.indexing.IndexingError:
+        print('===   ERROR   ===', file=sys.stderr)
+        print('Incorrect index column provided', file=sys.stderr)
+        print('If no index is specified in the dataset pass -i -1 as a parameter to this benchmark', file=sys.stderr)
+        exit(1)
+    finally:
+        if show_mem_usage:
+            run = False
+            t.join()
+        
+    print()
+    rg = ReportGenerator(output_dir, verbose)
+    rg.benchmarkReport(stats)
     print()
     print('============================================================================')
     print('|                             END OF BENCHMARK                             |')
     print('============================================================================')
     print()
     
-    run = False
-    t.join()
     return
 
 if __name__ == '__main__':

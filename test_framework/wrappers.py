@@ -6,6 +6,7 @@ Created on Sat Feb 15 15:37:34 2020
 """
 
 import numpy as np
+import psutil
 
 from pyod.models.knn import KNN
 from pyod.models.cof import COF
@@ -82,22 +83,6 @@ class AlgorithmWrapper():
     
     def _calculateInputParams(self):
         pass
-        # p = size / 10000
-        # params.append(p)
-        # params.append(size / 5000)
-        # params.append(size / 2500)
-        # params.append(size / 1000)
-        # params.append(size / 500)
-        # params.append(size / 250)
-        # params.append(size / 200)
-        # params.append(size / 150)
-        # params.append(size / 100)
-        # params.append(size / 75)
-        # params.append(size / 50)
-        # params.append(size / 40)
-        # params.append(size / 30)
-        # params.append(size / 20)
-        # params.append(size / 10)
             
 class KNNWrapper(AlgorithmWrapper):
     def __init__(self, dataset, parameters=None, verbose=0):
@@ -114,12 +99,18 @@ class KNNWrapper(AlgorithmWrapper):
     def _calculateInputParams(self):
         size = self._dataset.index.size
         params = []
+        sys_mem = psutil.virtual_memory().total
+        three_gigs = 1024 * 1024 * 1024 * 3
+        available_mem = (sys_mem - three_gigs) / 3
         for d in self._denoms:
             p = round(size / d)
-            if p * size < 500000000:
-                params.append(p)
+            if p * size < available_mem:
+                if p >= 1:
+                    params.append(p)
+                else:
+                    continue
             else:
-                params.append(round(500000000 / size))
+                params.append(round(available_mem / size))
                 break
         return params
     
@@ -150,7 +141,6 @@ class IFWrapper(AlgorithmWrapper):
         return np.array([1 if x == -1 else 0 for x in alg.fit_predict(dataset)])
     
     def _calculateInputParams(self):
-        size = self._dataset.index.size
         params = []
         for d in self._denoms:
             p = 100 / d
@@ -171,11 +161,18 @@ class LOFWrapper(AlgorithmWrapper):
     def _calculateInputParams(self):
         size = self._dataset.index.size
         params = []
+        sys_mem = psutil.virtual_memory().total
+        three_gigs = 1024 * 1024 * 1024 * 3
+        available_mem = (sys_mem - three_gigs) / 3
         for d in self._denoms:
             p = round(size / d)
-            if p * size < 500000000:
-                params.append(p)
+            if p * size < available_mem:
+                if p >= 1:
+                    params.append(p)
+                else:
+                    continue
             else:
+                params.append(round(available_mem / size))
                 break
         return params
     
