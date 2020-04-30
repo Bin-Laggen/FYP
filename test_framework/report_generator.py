@@ -16,6 +16,7 @@ import os
 import shutil
 
 class ReportGenerator():
+    algorithm_names = {'knn': 'K-Nearest Neighbours', 'iforest': 'Isolation Forest', 'lof': 'Local Outlier Factor'}
     def __init__(self, directory='result/', verbose=0):
         if not directory.endswith(('/', '\\')):
             directory += '/'
@@ -24,51 +25,98 @@ class ReportGenerator():
             os.mkdir(self._directory)
         self._verbose = verbose
         
-    def calculateMetrics(self, parsed_dataset, unparsed_dataset, outliers):
-        self._parsed_dataset = parsed_dataset
-        self._unparsed_dataset = unparsed_dataset
-        self._outliers = outliers
+    def reportOutlierDetection(self, parsed_dataset, unparsed_dataset, results):
+        overlap = None
+        overlap_data = None
+        if 'overlap' in results:
+            overlap = results['overlap']
+            del results['overlap']
         
-        outliers_dataset = self._generateOutlierComments()
-        pd.options.display.max_columns = outliers_dataset.shape[1]
+        metrics = dict()
+        for alg_name, res in results.items():
+            m, outlier_dataset = self._calculateMetrics(parsed_dataset, unparsed_dataset, res['best_labels'])
+            m['best_param'] = res['best_param']
+            metrics[alg_name] = m
+            
+            self._generateAlgorithmPage(alg_name, res, outlier_dataset)
+            
+        if type(overlap) != type(None):
+            metrics['overlap'], overlap_data = self._calculateMetrics(parsed_dataset, unparsed_dataset, overlap)
+            
+        metrics_df = pd.DataFrame.from_dict(metrics)
+        metrics_html = self._metricsDataframeToHTML(metrics_df)
         
-        total = outliers_dataset.index.size
-        print(outliers)
+        output = '<!DOCTYPE html><html><head><link rel="stylesheet" type="text/css" href="anomaly.css"></head><body>'
+        output += '<h1>Anomaly Detection Result ' + datetime.now().strftime("%d/%m/%y %H:%M") + '</h1>'
+        output += '<h3>Results</h3>'
+        output += metrics_html
+        
+        if type(overlap_data) != type(None):
+            output += '<h3>Anomalies found by all algorithms</h3>'
+            output += overlap_data.to_html().replace('border="1"', '')
+            
+        output += '</body></html>'
+        
+        shutil.copy2('anomaly.css', self._directory + 'anomaly.css')
+        with open(self._directory + 'anomaly_result.html', 'w') as file:
+            file.write(output)
+            file.close()
+            
+        return
+    
+    def _generateAlgorithmPage(self, alg_name, res, outlier_dataset):
+        if alg_name in self.__class__.algorithm_names:
+            name = self.__class__.algorithm_names[alg_name]
+        else:
+            name = alg_name
+            
+        scores_html = self._scoresDataframeToHTML(pd.DataFrame.from_dict(res['scores'], orient='index'), alg_name, res['best_param'])
+        
+        alg_page = '<!DOCTYPE html><html><head><link rel="stylesheet" type="text/css" href="anomaly.css"></head><body>'
+        alg_page += '<h1>' + name + '</h1>'
+        alg_page += '<h3>Results for detecting best parameter</h3>'
+        alg_page += scores_html
+        alg_page += '<h3>Anomalies found by ' + name + '</h3>'
+        alg_page += outlier_dataset.to_html().replace('border="1"', '')
+        alg_page += '</body></html>'
+        
+        alg_page = alg_page.replace('parameter', 'Parameter')
+        alg_page = alg_page.replace('sil', 'Silhouette Score')
+        alg_page = alg_page.replace('cal_har', 'Calinski-Harabasz Index')
+        alg_page = alg_page.replace('dav_bou', 'Davies–Bouldin Index')
+        alg_page = alg_page.replace('combined', 'Combined Score')
+        alg_page = alg_page.replace('time', 'Processing Time')
+        
+        with open(self._directory + alg_name + '.html', 'w') as file:
+            file.write(alg_page)
+            file.close()
+    
+    
+    def _calculateMetrics(self, parsed_dataset, unparsed_dataset, outliers):
+        
+        total = parsed_dataset.index.size
         outlier_count = np.count_nonzero(outliers)
         percentage = self._outlierPercentage(outlier_count, total)
-
-        print('=============================\n')
-        print('Dataset provided:\n')
-        print(self._unparsed_dataset)
-        print('\n\n=============================\n')
-        print('Dataset after parsing:\n')
-        print(self._parsed_dataset)
-        print('\n\n=============================\n')
-        print('Total rows in dataset:\n')
-        print(total)
-        print('\n\n=============================\n')
-        print('Anomalies detected:\n')
-        print(outliers_dataset[outliers==1])
-        print('\n\n=============================\n')
-        print('Number of anomalies found:\n')
-        print(outlier_count)
-        print('\n\n=============================\n')
-        print('Percentage of anomalies in dataset:\n')
-        print(percentage, '%')
-        print('\n\n=============================\n')
         
-    def _createRangeDicts(self):
+        outliers_dataset = self._generateOutlierComments(parsed_dataset, unparsed_dataset, outliers)
+        pd.options.display.max_columns = outliers_dataset.shape[1]
+
+        data = {'num_found': outlier_count, 'total': total, 'perc': percentage}
+        return data, outliers_dataset
+        
+    def _createRangeDicts(self, parsed_dataset):
         low_values = dict()
         high_values = dict()
-        for col in self._parsed_dataset:
-            low_values[col] = self._parsed_dataset[col].quantile(0.2)
-            high_values[col] = self._parsed_dataset[col].quantile(0.8)
+        for col in parsed_dataset:
+            low_values[col] = parsed_dataset[col].quantile(0.2)
+            high_values[col] = parsed_dataset[col].quantile(0.8)
         return low_values, high_values
     
-    def _generateOutlierComments(self):
-        low_values, high_values = self._createRangeDicts()
-        outliers_dataset = self._unparsed_dataset.copy()
-        outliers_dataset['outlier'] = self._outliers
+    def _generateOutlierComments(self, parsed_dataset, unparsed_dataset, outliers):
+        low_values, high_values = self._createRangeDicts(parsed_dataset)
+        outliers_dataset = unparsed_dataset.copy()
+        outliers_dataset['outlier'] = outliers
+        outliers_dataset = outliers_dataset[outliers_dataset['outlier']==1]
         
         comments = []
         for i, r in outliers_dataset.iterrows():
@@ -91,25 +139,70 @@ class ReportGenerator():
     def _outlierPercentage(self, outliers, total):
         return (outliers / total) * 100
     
+    def _metricsDataframeToHTML(self, df):
+        output = '<table class="dataframe" id="metrics"><thead><tr><th></th>'
+        for col in df:
+            if col in self.__class__.algorithm_names:
+                output += '<th><a href="' + col + '.html" target="_blank">' + self.__class__.algorithm_names[col] + '</a></th>'
+            else:
+                output += '<th>' + col + '</th>'
+        output += '</tr></thead><tbody>'
+        for row in df.itertuples():
+            output += '<tr>'
+            output += '<th>' + str(row.Index) + '</th>'
+            for col in df.columns:
+                att = getattr(row, col)
+                if np.isnan(att):
+                    output += '<td></td>'
+                else:
+                    output += '<td>' + str(att) + '</td>'
+            output += '</tr>'
+        output += '</tbody></table>'
+        output = output.replace('border="1" ', '')
+        output = output.replace('num_found', 'Number of anomalies detected')
+        output = output.replace('total', 'Total number of entries in dataset')
+        output = output.replace('perc', 'Percentage of anomalies in dataset')
+        output = output.replace('best_param', 'Best parameter for algorithm')
+        return output
+    
+    def _scoresDataframeToHTML(self, df, name, best):
+        best_ix = df[df['parameter']==best].index
+        output = '<table class="dataframe" id="' + name + '"><thead><tr>'
+        for col in df:
+            output += '<th>' + col + '</th>'
+        output += '</tr></thead><tbody>'
+        for row in df.itertuples():
+            if row.Index == best_ix:
+                output += '<tr class="best">'
+            else:
+                output += '<tr>'
+            for col in df.columns:
+                att = getattr(row, col)
+                output += '<td>' + str(att) + '</td>'
+            output += '</tr>'
+        output += '</tbody></table>'
+        return output
+    
     def benchmarkReport(self, stats):
-        knn_df = pd.DataFrame.from_dict(stats['KNN'], orient='index')
-        if_df = pd.DataFrame.from_dict(stats['IFOREST'], orient='index')
-        lof_df = pd.DataFrame.from_dict(stats['LOF'], orient='index')
+        knn_df = pd.DataFrame.from_dict(stats['knn'], orient='index')
+        if_df = pd.DataFrame.from_dict(stats['iforest'], orient='index')
+        lof_df = pd.DataFrame.from_dict(stats['lof'], orient='index')
         
         output = '<!DOCTYPE html><html><head><link rel="stylesheet" type="text/css" href="benchmark.css"></head><body>'
         output += '<h1>Benchmark Result ' + datetime.now().strftime("%d/%m/%y %H:%M") + '</h1>'
         output += '<h3>K-Nearest Neighbours</h3><div class="wrap">'
-        output += self._dataframeToHTML(knn_df, 'KNN')
-        output += '<div class="image"><img src="KNN.png"/></div></div>'
+        output += self._benchmarkDataframeToHTML(knn_df, 'knn')
+        output += '<div class="image"><img src="knn.png"/></div></div>'
         output += '<h3>Isolation Forest</h3><div class="wrap">'
-        output += self._dataframeToHTML(if_df, 'IFOREST')
-        output += '<div class="image"><img src="IFOREST.png"/></div></div>'
+        output += self._benchmarkDataframeToHTML(if_df, 'iforest')
+        output += '<div class="image"><img src="iforest.png"/></div></div>'
         output += '<h3>Local Outlier Factor</h3><div class="wrap">'
-        output += self._dataframeToHTML(lof_df, 'LOF')
-        output += '<div class="image"><img src="LOF.png"/></div></div>'
+        output += self._benchmarkDataframeToHTML(lof_df, 'lof')
+        output += '<div class="image"><img src="lof.png"/></div></div>'
         output += '</body></html>'
         
         output = output.replace('parameter', 'Parameter')
+        output = output.replace('score', 'Decision Score')
         output = output.replace('num_found', 'Number of outliers detected')
         output = output.replace('od_acc', 'Outlier Detection Accuracy (%)')
         output = output.replace('cl_acc', 'Classification Accuracy (%)')
@@ -124,12 +217,12 @@ class ReportGenerator():
             file.write(output)
             file.close()
             
-        self._graphBenchmark(knn_df, 'KNN')
-        self._graphBenchmark(if_df, 'IFOREST')
-        self._graphBenchmark(lof_df, 'LOF')
+        self._graphBenchmark(knn_df, 'knn')
+        self._graphBenchmark(if_df, 'iforest')
+        self._graphBenchmark(lof_df, 'lof')
         return
     
-    def _dataframeToHTML(self, df, name):
+    def _benchmarkDataframeToHTML(self, df, name):
         best_acc = df.loc[df['od_acc']==df['od_acc'].max()]
         best = best_acc['time'].idxmin()
         worst_acc = df.loc[df['od_acc']==df['od_acc'].min()]
@@ -154,7 +247,7 @@ class ReportGenerator():
         output += '</tbody></table>'
         return output
     
-    def _graphBenchmark(self, df, name):
+    def _graphBenchmark(self, df, alg_name):
         labels = [round(item, 3) for item in df['parameter']]
         od = [round(item, 2) for item in df['od_acc']]
         com = [round(item, 2) for item in df['com_acc']]
@@ -167,7 +260,14 @@ class ReportGenerator():
         rects1 = ax.bar(x - width/2, od, width, label='Outlier')
         rects2 = ax.bar(x + width/2, com, width, label='Combined')
         
+        print(alg_name)
+        if alg_name in self.__class__.algorithm_names:
+            name = self.__class__.algorithm_names[alg_name]
+        else:
+            name = alg_name
+        
         ax.set_ylabel('Accuracy Scores')
+        ax.set_xlabel('Parameter')
         ax.set_title(name + ' accuracy scores based on parameter')
         ax.set_xticks(x)
         ax.set_xticklabels(labels)
@@ -179,7 +279,7 @@ class ReportGenerator():
         
         fig.tight_layout()
         
-        plt.savefig(self._directory + name)
+        plt.savefig(self._directory + alg_name)
         return
         
     def _autolabelBar(self, ax, rects):

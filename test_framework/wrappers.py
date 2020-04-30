@@ -8,6 +8,8 @@ Created on Sat Feb 15 15:37:34 2020
 import numpy as np
 import psutil
 
+from datetime import datetime
+
 from pyod.models.knn import KNN
 from pyod.models.cof import COF
 from sklearn.ensemble import IsolationForest
@@ -27,15 +29,43 @@ class AlgorithmWrapper():
         self.name = ''
     
     def runTests(self):
-        results = []
-        for p in self._parameters:
+        results = dict()
+        for i, p in enumerate(self._parameters):
             if self._verbose > 0:
                 print('Testing param:', p)
-            results.append(self._predictOutliers(p))
-        return results, self._parseResults(results)
+                
+            scores = {'parameter': p}
+            start = datetime.now()
+            predicted_labels = self._predictOutliers(p)
+            processing_time = datetime.now() - start
+            scores = self._calculateScores(predicted_labels, scores)
+            scores['time'] = processing_time
+            results[i] = scores
+            
+            if self._verbose > 0:
+                print(predicted_labels)
+                
+            if self._verbose > 1:
+                print(self._dataset[predicted_labels==1])
+                
+            if self._verbose > 0:
+                print('Silhoutte score:', scores['sil'], 'the higher the better')
+                print('Calinski-Harabasz index:', scores['cal_har'], 'the higher the better')
+                print('Davies–Bouldin index:', scores['dav_bou'], 'the lower the better')
+                print('====\n')
+                print()
+                
+            # results.append(self._predictOutliers(p))
+        return results, self._calculateBestParam(results)
     
     def singleRun(self, param, dataset=None):
         return self._predictOutliers(param, dataset)
+    
+    def singleRunWithScore(self, param, dataset=None):
+        scores = dict()
+        res = self._predictOutliers(param, dataset)
+        combined = self._calculateScores(res, scores)['combined']
+        return res, combined
     
     def getParams(self):
         return self._parameters
@@ -43,43 +73,80 @@ class AlgorithmWrapper():
     def _predictOutliers(self, param, dataset=None):
         pass
     
-    def _parseResults(self, results):
-        scores = {'s': (-1000000, -1), 'ch': (-1000000, -1), 'db': (1000000, -1)}
-        for i, p in enumerate(self._parameters):
-            sil = metrics.silhouette_score(self._dataset, results[i],
-                                          metric='euclidean',
-                                          sample_size=5000)
-            ch = metrics.calinski_harabasz_score(self._dataset, results[i])
-            db = metrics.davies_bouldin_score(self._dataset, results[i])
+    def _calculateScores(self, result, scores):
+        combined = 1
+        changed = False
+        try:
+            sil = metrics.silhouette_score(self._dataset, result,
+                                              metric='euclidean',
+                                              sample_size=5000)
+            combined *= sil
+            changed = True
+        except ValueError:
+            sil = -1;
+        scores['sil'] = sil
+        
+        try:
+            ch = metrics.calinski_harabasz_score(self._dataset, result)
+            combined *= ch
+            changed = True
+        except ValueError:
+            ch = -1
+        scores['cal_har'] = ch
             
-            if sil > scores['s'][0]:
-                scores['s'] = (sil, p)
-            if ch > scores['ch'][0]:
-                scores['ch'] = (ch, p)
-            if db < scores['db'][0]:
-                scores['db'] = (db, p)
-                
-            if self._verbose > 0:
-                print('Param:', p)
-                print(results[i])
-                print('Silhoutte score:', sil, 'the higher the better')
-                print('Calinski-Harabasz index:', ch, 'the higher the better')
-                print('Davies–Bouldin index:', db, 'the lower the better')
-                print('====\n')
-            if self._verbose > 1:
-                print(self._dataset[results[i]==1])
-        if self._verbose > 0:
-            print(scores)
-        return self._calculateBestParam(scores)
+        try:
+            db = metrics.davies_bouldin_score(self._dataset, result)
+            combined /= db
+            changed = True
+        except ValueError:
+            db = 999999999
+        scores['dav_bou'] = db
+        if changed == True:
+            scores['combined'] = combined
+        else:
+            scores['combined'] = None
+        return scores
+        
+    def _calculateBestParam(self, results):
+        best = (-1, -1)
+        for _, score in results.items():
+            if score['combined'] != None and score['combined'] > best[1]:
+                best = (score['parameter'], score['combined'])
+        return best[0]
     
-    def _calculateBestParam(self, scores):
-        params = dict()
-        for k, v in scores.items():
-            if v[1] not in params:
-                params[v[1]] = 1
-            else:
-                params[v[1]] += 1
-        return max(params, key=lambda key: params[key])
+    # def _parseResults(self, results):
+    #     best_scores = {'sil': (-1000000, -1), 'cal_har': (-1000000, -1), 'dav_bou': (1000000, -1)}
+    #     # for i, p in enumerate(self._parameters):
+    #     #     sil = metrics.silhouette_score(self._dataset, results[i],
+    #     #                                   metric='euclidean',
+    #     #                                   sample_size=5000)
+    #     #     ch = metrics.calinski_harabasz_score(self._dataset, results[i])
+    #     #     db = metrics.davies_bouldin_score(self._dataset, results[i])
+    #     for p, score in results.items():
+    #         sil = score['sil']
+    #         ch = score['cal_har']
+    #         db = score['dav_bou']
+            
+    #         if sil > best_scores['sil'][0]:
+    #             best_scores['sil'] = (sil, p)
+    #         if ch > best_scores['cal_har'][0]:
+    #             best_scores['cal_har'] = (ch, p)
+    #         if db < best_scores['dav_bou'][0]:
+    #             best_scores['dav_bou'] = (db, p)
+                
+    #     if self._verbose > -1:
+    #         print(best_scores)
+    #         print()
+    #     return self._calculateBestParam(best_scores)
+    
+    # def _calculateBestParam(self, scores):
+    #     params = dict()
+    #     for k, v in scores.items():
+    #         if v[1] not in params:
+    #             params[v[1]] = 1
+    #         else:
+    #             params[v[1]] += 1
+    #     return max(params, key=lambda key: params[key])
     
     def _calculateInputParams(self):
         pass
@@ -100,17 +167,17 @@ class KNNWrapper(AlgorithmWrapper):
         size = self._dataset.index.size
         params = []
         sys_mem = psutil.virtual_memory().total
-        three_gigs = 1024 * 1024 * 1024 * 3
-        available_mem = (sys_mem - three_gigs) / 3
+        GB = 1024 * 1024 * 1024
+        available_mem = (sys_mem - (2 * GB)) / 3 # / 3
         for d in self._denoms:
             p = round(size / d)
-            if p * size < available_mem:
+            if p * size * 8 < available_mem:
                 if p >= 1:
                     params.append(p)
                 else:
                     continue
             else:
-                params.append(round(available_mem / size))
+                params.append(round((available_mem - (GB / 2)) / (size * 8)))
                 break
         return params
     
@@ -144,7 +211,7 @@ class IFWrapper(AlgorithmWrapper):
         params = []
         for d in self._denoms:
             p = 100 / d
-            params.append(p)
+            params.append(round(p, 3))
         return params
     
 class LOFWrapper(AlgorithmWrapper):
@@ -162,17 +229,17 @@ class LOFWrapper(AlgorithmWrapper):
         size = self._dataset.index.size
         params = []
         sys_mem = psutil.virtual_memory().total
-        three_gigs = 1024 * 1024 * 1024 * 3
-        available_mem = (sys_mem - three_gigs) / 3
+        GB = 1024 * 1024 * 1024
+        available_mem = (sys_mem - (2 * GB)) / 3 # / 3
         for d in self._denoms:
             p = round(size / d)
-            if p * size < available_mem:
+            if p * size * 8 < available_mem:
                 if p >= 1:
                     params.append(p)
                 else:
                     continue
             else:
-                params.append(round(available_mem / size))
+                params.append(round((available_mem - (GB / 2)) / (size * 8)))
                 break
         return params
     

@@ -19,7 +19,7 @@ from datetime import datetime
 
 from sklearn import metrics
 
-from log_parser import CSVLogParser, JSONLogParser, ExcelLogParser
+import log_parser
 from test_runner import OutlierTestRunner
 from wrappers import KNNWrapper, IFWrapper, LOFWrapper
 from report_generator import ReportGenerator
@@ -27,35 +27,38 @@ from report_generator import ReportGenerator
 global run
 
 def benchmarkAllAlgorithms(parsed_dataset, input_data, outlier_label, stats, verbose):
-    print('KNN')
+    if verbose > 0:
+        print('KNN')
     knn = KNNWrapper(parsed_dataset)
     knn_stats = dict()
     singleBenchmark(knn, input_data, outlier_label, knn_stats, verbose)
-    # print(knn_stats)
-    print('============================================================================')
-    print()
+    if verbose > 0:
+        print('============================================================================')
+        print()
     
-    print('IFOREST')
+    if verbose > 0:
+        print('IFOREST')
     iforest = IFWrapper(parsed_dataset)
     if_stats = dict()
     singleBenchmark(iforest, input_data, outlier_label, if_stats, verbose)
-    # print(if_stats)
-    print('============================================================================')
-    print()
+    if verbose > 0:
+        print('============================================================================')
+        print()
     
-    print('LOF')
+    if verbose > 0:
+        print('LOF')
     lof = LOFWrapper(parsed_dataset)
     lof_stats = dict()
     singleBenchmark(lof, input_data, outlier_label, lof_stats, verbose)
-    # print(lof_stats)
-    print('============================================================================')
-    print()
-    print('<><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><>')
-    print()
+    if verbose > 0:
+        print('============================================================================')
+        print()
+        print('<><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><>')
+        print()
     
-    stats['KNN'] = knn_stats
-    stats['IFOREST'] = if_stats
-    stats['LOF'] = lof_stats
+    stats['knn'] = knn_stats
+    stats['iforest'] = if_stats
+    stats['lof'] = lof_stats
     return
         
 def singleBenchmark(algorithm, input_data, outlier_label, stats, verbose):
@@ -67,7 +70,7 @@ def singleBenchmark(algorithm, input_data, outlier_label, stats, verbose):
             print('Param:', param)
         
         start = datetime.now()
-        res = algorithm.singleRun(param)
+        res, score = algorithm.singleRunWithScore(param)
         processing_time = datetime.now() - start
         
         C = metrics.confusion_matrix(input_data[outlier_label], res)
@@ -80,22 +83,22 @@ def singleBenchmark(algorithm, input_data, outlier_label, stats, verbose):
         com_acc = round(od_acc * cl_acc, 4)
         
         if verbose > 0:
-            print('True inliers:', C[0,0])
-            print('False inliers:', C[1,0])
-            print('True outliers:', C[1,1])
-            print('False outliers:', C[0,1])
+            print('True inliers:', C[0,0], '\t\t\t\t')
+            print('False inliers:', C[1,0], '\t\t\t\t')
+            print('True outliers:', C[1,1], '\t\t\t\t')
+            print('False outliers:', C[0,1], '\t\t\t\t')
             print(C[1,1] + C[0,1], '/', outliers_in_dataset,
-                  '=', (C[1,1] + C[0,1] / outliers_in_dataset) * 100, '%')
-            print('Outlier Detection Accuraccy', od_acc * 100, '%')
-            print('Classification Accuraccy', cl_acc * 100, '%')
-            print('Combined Accuraccy', com_acc * 100, '%')
-            print('Balanced Accuraccy', bal_acc * 100, '%')
-            print('Precision (Binary) Accuraccy', pre_acc_bin * 100, '%')
-            print('Precision (Macro) Accuraccy', pre_acc_mac * 100, '%')
+                  '=', (C[1,1] + C[0,1] / outliers_in_dataset) * 100, '%', '\t\t\t\t')
+            print('Outlier Detection Accuraccy', od_acc * 100, '%', '\t\t')
+            print('Classification Accuraccy', cl_acc * 100, '%', '\t\t')
+            print('Combined Accuraccy', com_acc * 100, '%', '\t\t\t\t')
+            print('Balanced Accuraccy', bal_acc * 100, '%', '\t\t\t\t')
+            print('Precision (Binary) Accuraccy', pre_acc_bin * 100, '%', '\t\t')
+            print('Precision (Macro) Accuraccy', pre_acc_mac * 100, '%', '\t\t')
             print(processing_time)
             print()
         
-        stats[i] = {'parameter': param, 'num_found': C[1,1] + C[0,1], 'od_acc': od_acc * 100, 
+        stats[i] = {'parameter': param, 'score': score, 'num_found': C[1,1] + C[0,1], 'od_acc': od_acc * 100, 
                     'cl_acc': cl_acc * 100, 'com_acc': com_acc * 100, 'bal_acc': bal_acc * 100,
                     'pre_acc_bin': pre_acc_bin * 100, 'pre_acc_mac': pre_acc_mac * 100, 
                     'time': processing_time}
@@ -163,11 +166,11 @@ def main():
     
     
     if file_type.lower() == 'csv':
-        lp = CSVLogParser(filename, index, outlier_label, verbose)
+        lp = log_parser.CSVLogParser(filename, index, outlier_label, verbose)
     elif file_type.lower() == 'json':
-        lp = JSONLogParser(filename, args.json, outlier_label, verbose)
+        lp = log_parser.JSONLogParser(filename, args.json, outlier_label, verbose)
     elif file_type.lower().startswith('xls'):
-        lp = ExcelLogParser(filename, args.sheet, index, outlier_label, verbose)
+        lp = log_parser.ExcelLogParser(filename, args.sheet, index, outlier_label, verbose)
     else:
         print('===   ERROR   ===', file=sys.stderr)
         print('Unknown file type:', file_type, file=sys.stderr)
@@ -205,9 +208,9 @@ def main():
             run = False
             t.join()
         
-    print()
     rg = ReportGenerator(output_dir, verbose)
     rg.benchmarkReport(stats)
+    
     print()
     print('============================================================================')
     print('|                             END OF BENCHMARK                             |')
