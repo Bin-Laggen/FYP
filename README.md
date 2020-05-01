@@ -44,4 +44,5 @@ This module is used to provide anomaly detection algorithms to the other modules
 
 ## Architecture
 ![Architecture Diagram](arch_diagram.png)
+![Benchmark Architecture Diagram](benchmark_arch_diagram.png)
 
