@@ -43,6 +43,9 @@ This module is responsible for running tests on the algorithms provided. It gath
 This module is used to provide anomaly detection algorithms to the other modules. It uses [Scikit-Learn](https://scikit-learn.org/) and [PyOD](https://pyod.readthedocs.io/en/latest/) for each algorithm and because each library provides its functionality using different methods and outputs the wrappers are necessary to allow the tools to perform the same actions on all algorithms using the same interface.
 
 ## Architecture
+### Anomaly Detection
 ![Architecture Diagram](arch_diagram.png)
+***
+### Benchmark
 ![Benchmark Architecture Diagram](benchmark_arch_diagram.png)
-
+***
